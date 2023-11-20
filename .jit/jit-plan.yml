@@ -1,6 +1,5 @@
 name: My plan
 level: beginner
-update_id: 6a77422f-8cd4-49ea-9c67-bd3a0d55c7ec
 author: Jit
 version: 0.1
 owners:
@@ -10,11 +9,15 @@ references:
 tags: []
 items:
   - name: Scan your code for vulnerabilities (SAST)
-    uses: jitsecurity-controls/jit-plans/items/code/item-code-vulnerability.yml@latest
+    uses: >-
+      jitsecurity-controls/jit-plans/items/code/item-code-vulnerability.yml@latest
   - name: Scan your code dependencies for vulnerabilities (SCA)
     uses: jitsecurity-controls/jit-plans/items/code/item-dependency-check.yml@latest
   - name: Scan code for hard-coded secrets
     uses: jitsecurity-controls/jit-plans/items/code/item-secret-detection.yml@latest
+  - name: Scan your infrastructure-as-code (IaC) for misconfigurations
+    uses: >-
+      jitsecurity-controls/jit-plans/items/infrastructure/item-iac-misconfiguration-detection.yml@latest
 override:
   workflows:
     secret-detection:
@@ -24,9 +27,9 @@ override:
         secret-detection-trufflehog:
           enabled: true
           steps:
-          - name: Run Trufflehog
-            uses: registry.jit.io/control-trufflehog-alpine:latest
-            with:
-              args: filesystem ${WORK_DIR:-.} --json --only-verified
-              env:
-                SECURITY_CONTROL_OUTPUT_FILE: /tmp/final-findings.json
+            - name: Run Trufflehog
+              uses: registry.jit.io/control-trufflehog-alpine:latest
+              with:
+                args: filesystem ${WORK_DIR:-.} --json --only-verified
+                env:
+                  SECURITY_CONTROL_OUTPUT_FILE: /tmp/final-findings.json
