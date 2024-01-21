@@ -17,18 +17,3 @@ items:
     uses: jitsecurity-controls/jit-plans/items/infrastructure/item-iac-misconfiguration-detection.yml@latest
   - name: Scan code for hard-coded secrets
     uses: jitsecurity-controls/jit-plans/items/code/item-secret-detection.yml@latest
-override:
-  workflows:
-    secret-detection:
-      jobs:
-        secret-detection:
-          enabled: false
-        secret-detection-trufflehog:
-          enabled: true
-          steps:
-          - name: Run Trufflehog
-            uses: registry.jit.io/control-trufflehog-alpine:latest
-            with:
-              args: filesystem ${WORK_DIR:-.} --json --only-verified
-              env:
-                SECURITY_CONTROL_OUTPUT_FILE: /tmp/final-findings.json
