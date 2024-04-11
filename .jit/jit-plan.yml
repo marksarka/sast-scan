@@ -30,10 +30,4 @@ items:
   - name: Security Issues Prioritization (DCF-23)
     uses: >-
       jitsecurity-controls/jit-plans/items/code/item-drata-security-issues-prioritization.yml@latest
-  - name: Conduct Control Self-Assessments (DCF-153)
-    uses: >-
-      jitsecurity-controls/jit-plans/items/code/item-drata-conduct-control-self-assessments.yml@latest
-  - name: Continuous Control Monitoring (DCF-160)
-    uses: >-
-      jitsecurity-controls/jit-plans/items/code/item-drata-continuous-control-monitoring.yml@latest
 
