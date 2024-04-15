@@ -3,4 +3,6 @@ license-compliance:
     - GPL*
     - CCBY*
     - MPL*
+    - epl*
+    - agpl*
   dual_license: restrictive # or permissive
