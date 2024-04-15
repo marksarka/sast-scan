@@ -1,20 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 import json
 import os
 
@@ -75,21 +60,37 @@ def calculate_depscan_metrics(dep_data):
                 metrics[f"{usage}_{severity}"] += 1
                 if usage == "required":
                     required_pkgs_found = True
-        metrics[severity] += 1
-        metrics["total"] += 1
+        # Ignore unknown severity for now
+        if severity == "unknown":
+            continue
+        else:
+            metrics[severity] += 1
+            metrics["total"] += 1
     return metrics, required_pkgs_found
 
 
-def summary(sarif_files, depscan_files=None, aggregate_file=None, override_rules={}):
+def summary(
+    sarif_files,
+    depscan_files=None,
+    aggregate_file=None,
+    override_rules={},
+    baseline_file=None,
+):
     """Generate overall scan summary based on the generated
     SARIF file
 
     :param sarif_files: List of generated sarif report files
+    :param depscan_files: Depscan result files
     :param aggregate_file: Filename to store aggregate data
     :param override_rules Build break rules to override for testing
+    :param baseline_file: Scan baseline file
     :returns dict representing the summary
     """
     report_summary = {}
+    baseline_fingerprints = {
+        "scanPrimaryLocationHash": [],
+        "scanTagsHash": [],
+    }
     build_status = "pass"
     # This is the list of all runs which will get stored as an aggregate
     run_data_list = []
@@ -98,6 +99,9 @@ def summary(sarif_files, depscan_files=None, aggregate_file=None, override_rules
     # Collect stats from depscan files if available
     if depscan_files:
         for df in depscan_files:
+            # Skip analyzing risk audit files
+            if "risk" in df:
+                continue
             with open(df, mode="r") as drep_file:
                 dep_data = get_depscan_data(drep_file)
                 if not dep_data:
@@ -156,6 +160,7 @@ def summary(sarif_files, depscan_files=None, aggregate_file=None, override_rules
     for sf in sarif_files:
         with open(sf, mode="r") as report_file:
             report_data = json.load(report_file)
+            existing_tool = False
             # skip this file if the data is empty
             if not report_data or not report_data.get("runs"):
                 LOG.warn("Report file {} is invalid. Skipping ...".format(sf))
@@ -166,23 +171,26 @@ def summary(sarif_files, depscan_files=None, aggregate_file=None, override_rules
                 run_data_list.append(run)
                 tool_desc = run["tool"]["driver"]["name"]
                 tool_name = tool_desc
-                # Initialise
-                report_summary[tool_name] = {
-                    "tool": tool_desc,
-                    "critical": 0,
-                    "high": 0,
-                    "medium": 0,
-                    "low": 0,
-                    "status": ":white_heavy_check_mark:",
-                }
+                # Initialise if the referred tool is seen for the first time
+                if not report_summary.get(tool_name):
+                    report_summary[tool_name] = {
+                        "tool": tool_desc,
+                        "critical": 0,
+                        "high": 0,
+                        "medium": 0,
+                        "low": 0,
+                        "status": ":white_heavy_check_mark:",
+                    }
+                else:
+                    existing_tool = True
                 results = run.get("results", [])
                 metrics = run.get("properties", {}).get("metrics", None)
                 # If the result includes metrics use it. If not compute it
-                if metrics:
+                if metrics and not existing_tool:
                     report_summary[tool_name].update(metrics)
                     report_summary[tool_name].pop("total", None)
-                else:
-                    for aresult in results:
+                for aresult in results:
+                    if not metrics or existing_tool:
                         if aresult.get("properties"):
                             sev = aresult["properties"]["issue_severity"].lower()
                         else:
@@ -190,6 +198,15 @@ def summary(sarif_files, depscan_files=None, aggregate_file=None, override_rules
                                 tool_name.lower(), "medium"
                             )
                         report_summary[tool_name][sev] += 1
+                    # Track the fingerprints
+                    if aresult.get("partialFingerprints"):
+                        result_fingerprints = aresult.get("partialFingerprints")
+                        for rfk, rfv in result_fingerprints.items():
+                            if not rfv:
+                                continue
+                            # We are only interested in a small subset of hashes namely scanPrimaryLocationHash, scanTagsHash
+                            if rfk in ["scanPrimaryLocationHash", "scanTagsHash"]:
+                                baseline_fingerprints.setdefault(rfk, []).append(rfv)
                 # Compare against the build break rule to determine status
                 tool_rules = config.get("build_break_rules").get(tool_name, {})
                 build_break_rules = {**default_rules, **tool_rules, **override_rules}
@@ -208,6 +225,9 @@ def summary(sarif_files, depscan_files=None, aggregate_file=None, override_rules
         # aggregate.sarif_aggregate(run_data_list, agg_sarif_file)
         aggregate.jsonl_aggregate(run_data_list, aggregate_file)
         LOG.debug("Aggregate report written to {}\n".format(aggregate_file))
+    if baseline_file:
+        aggregate.store_baseline(baseline_fingerprints, baseline_file)
+        LOG.info("Baseline file written to {}".format(baseline_file))
     return report_summary, build_status
 
 

@@ -42,6 +42,7 @@ def is_taintable_function(ast_node):
             # Flask route and Django tag
             if _get_last_of_iterable(get_call_names(decorator.func)) in [
                 "route",
+                "errorhandler",
                 "simple_tag",
                 "inclusion_tag",
                 "to_end_tag",
@@ -53,21 +54,49 @@ def is_taintable_function(ast_node):
                 "put",
                 "delete",
                 "middleware",
+                "api_view",
+                "action",
+                "csrf_exempt",
+                "deserialise_with",
+                "marshal_with",
+                "before",
+                "csrf_protect",
+                "requires_csrf_token",
+                "xframe_options_exempt",
+                "xframe_options_deny",
+                "xframe_options_sameorigin",
+                "before_first_request",
+                "receiver",
+                "require_http_methods",
+                "application",
+                "command",
+                "option",
+                "group",
+                "argument",
             ]:
                 return True
     # Ignore database functions
     if len(ast_node.args.args):
         first_arg_name = ast_node.args.args[0].arg
-        # Common view functions such as django, starlette
-        if first_arg_name in ["request", "context", "scope"]:
+        if first_arg_name == "self" and len(ast_node.args.args) > 1:
+            first_arg_name = ast_node.args.args[1].arg
+        # Common view functions such as django, starlette, falcon
+        if first_arg_name in ["req", "request", "context", "scope", "environ"]:
             return True
+        # Ignore dao classes due to potential FP
+        if first_arg_name in ["conn", "connection", "cls", "session", "session_cls"]:
+            return False
     # Ignore internal functions prefixed with _
     if is_function_with_leading_(ast_node):
         return False
     # Ignore known validation and sanitization functions
-    for n in ["valid", "sanitize", "sanitise", "is_", "set_"]:
-        if ast_node.name.startswith(n):
+    for n in ["valid", "sanitize", "sanitise", "is_", "set_", "assert"]:
+        if n in ast_node.name:
             return False
+    # Should we limit the scan only to web routes?
+    web_route_only = os.environ.get("WEB_ROUTE_ONLY", False)
+    if web_route_only:
+        return False
     return True
 
 

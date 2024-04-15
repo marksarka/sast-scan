@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 """
 Multi-language static analysis scanner
 """
@@ -39,9 +24,9 @@ from lib.builder import auto_build
 from lib.executor import exec_tool, execute_default_cmd
 from lib.integration import provider
 from lib.logger import LOG, console
-from lib.telemetry import track
 from lib.pyt.cfg_analyzer import deep_analysis
 from lib.pyt.formatters.json import report as py_json_report
+from lib.telemetry import track
 
 product_logo = """
 ███████╗ ██████╗ █████╗ ███╗   ██╗
@@ -302,6 +287,7 @@ def py_deep_scan(src, reports_dir, convert, repo_context):
     report_fname = utils.get_report_file(
         "taint-python", reports_dir, convert, ext_name="json"
     )
+    web_route_only = config.get("WEB_ROUTE_ONLY", False)
     py_files = utils.find_files(src, ".py")
     LOG.debug(f"Scanning {len(py_files)} python files ...")
     try:
@@ -437,8 +423,8 @@ def pmd_scan(src, reports_dir, convert, repo_context):
         return
     pmd_args = [
         *pmd_cmd,
-        "-no-cache",
-        "--failOnViolation",
+        "--no-cache",
+        "--fail-on-violation",
         "false",
         "-language",
         "java",
@@ -573,9 +559,6 @@ def sec_scan(src, reports_dir, convert, repo_context):
       repo_context Repo context
     """
     if not utils.check_command("njsscan"):
-        LOG.warning(
-            "njsscan is no longer bundled with scan. Please use shiftleft/scan-oss container image if this tool is required."
-        )
         return
     convert_args = []
     report_fname = utils.get_report_file("source-js", reports_dir, convert)
@@ -652,7 +635,7 @@ def should_skip(src_dir, reports_dir, repo_context, scan_mode):
     return False
 
 
-def should_annotate(git_provider, repo_context, findings_file):
+def should_annotate(git_provider, repo_context, findings_file, depscan_files):
     """
     Method to check if the build or PR should get annotated.
 
@@ -664,11 +647,11 @@ def should_annotate(git_provider, repo_context, findings_file):
     annotate_flag = config.get("scan_annotate_pr", "")
     if (
         annotate_flag == "true" or annotate_flag == "1" or git_provider == "bitbucket"
-    ) and findings_file:
+    ) and (findings_file or depscan_files):
         return True
     if repo_context.get("pullRequest") and git_provider == "gitlab":
         LOG.info(
-            "Scan can automatically add the summary as a merge request comment. To learn more - https://slscan.io/en/latest/integrations/gitlab/#merge-request-comment-feature"
+            "Scan can automatically add the summary as a merge request comment. To learn more - https://appthreat.com/en/latest/integrations/gitlab/#merge-request-comment-feature"
         )
     return False
 
@@ -677,25 +660,20 @@ def main():
     start_time = time.monotonic_ns()
     args = build_args()
     src_dir = args.src_dir
+    type = args.scan_type
+    reports_base_dir = os.getcwd()
     if not args.src_dir:
         src_dir = os.getcwd()
-    reports_dir = args.reports_dir
-    if not reports_dir:
-        reports_dir = os.path.join(src_dir, "reports")
-    os.makedirs(reports_dir, exist_ok=True)
-    type = args.scan_type
     scan_mode = args.scan_mode
     if scan_mode:
         scan_mode = scan_mode.lower()
+    # Set the source directory as an environment variable if not set
+    if os.getenv("SAST_SCAN_SRC_DIR") is None:
+        config.set("SAST_SCAN_SRC_DIR", src_dir)
     # Get or construct the run uuid
     run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
     config.set("run_uuid", run_uuid)
-    # Set the source directory as an environment variable
-    config.set("SAST_SCAN_SRC_DIR", src_dir)
     repo_context = context.find_repo_details(src_dir)
-    # Should we skip this scan
-    if should_skip(src_dir, reports_dir, repo_context, scan_mode):
-        sys.exit(0)
     workspace = os.getenv("WORKSPACE")
     if workspace is None and scan_mode != "ide":
         # In case of GitHub action empty workspace forces relative url
@@ -706,9 +684,6 @@ def main():
         if workspace:
             config.set("WORKSPACE", workspace)
     config.reload()
-    # Check if we should authenticate with inspect
-    if not args.nocloud:
-        inspect.authenticate()
     # Identify project type
     if not type:
         # Check the local config first. If not try auto detection
@@ -719,6 +694,19 @@ def main():
             type = utils.detect_project_type(src_dir, scan_mode)
     else:
         type = type.split(",")
+    reports_dir = args.reports_dir
+    if not reports_dir:
+        if "docker" in type or "podman" in type or "container" in type:
+            reports_dir = os.path.join(reports_base_dir, "reports")
+        else:
+            reports_dir = os.path.join(src_dir, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    # Should we skip this scan
+    if should_skip(src_dir, reports_dir, repo_context, scan_mode):
+        sys.exit(0)
+    # Check if we should authenticate with inspect
+    if not args.nocloud:
+        inspect.authenticate()
     if inspect.is_authenticated():
         console.print(ngsast_logo, style="info")
     else:
@@ -734,6 +722,7 @@ def main():
     sarif_files = [p.as_posix() for p in Path(reports_dir).rglob("*.sarif")]
     depscan_files = [p.as_posix() for p in Path(reports_dir).rglob("depscan*.json")]
     agg_fname = None
+    baseline_fname = os.path.join(reports_dir, ".sastscan.baseline")
     if scan_mode != "ide":
         agg_fname = utils.get_report_file(
             "scan-full", reports_dir, False, ext_name="json"
@@ -742,10 +731,13 @@ def main():
         src_dir, repo_context, reports_dir, sarif_files
     )
     report_summary, build_status = analysis.summary(
-        sarif_files, depscan_files, agg_fname
+        sarif_files=sarif_files,
+        depscan_files=depscan_files,
+        aggregate_file=agg_fname,
+        baseline_file=baseline_fname,
     )
     git_provider = provider.get_git_provider(repo_context)
-    if should_annotate(git_provider, repo_context, findings_file):
+    if should_annotate(git_provider, repo_context, findings_file, depscan_files):
         # Create PR status and Reports via the git provider
         git_provider.annotate_pr(
             repo_context, findings_file, report_summary, build_status
@@ -763,6 +755,9 @@ def main():
                 "scan_time_sec": round((end_time - start_time) / 1000000000, 2),
             }
         )
+        # Issue https://github.com/ShiftLeftSecurity/scan-action/issues/23
+        if not sarif_files:
+            create_empty_result(src_dir, reports_dir)
         if not args.noerror and not scan_mode == "ide":
             sys.exit(1 if build_status == "fail" else 0)
     else:

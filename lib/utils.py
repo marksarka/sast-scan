@@ -1,18 +1,3 @@
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 import os
 import re
 import shutil
@@ -207,6 +192,27 @@ def find_csharp_artifacts(search_dir):
     return result
 
 
+def is_binary_string(content):
+    """
+    Method to check if the given content is a binary string
+    """
+    textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
+    return bool(content.translate(None, textchars))
+
+
+def is_exe(src):
+    """Detect if the source is a binary file
+    :param src: Source path
+    :return True if binary file. False otherwise.
+    """
+    if os.path.isfile(src):
+        try:
+            return is_binary_string(open(src, "rb").read(1024))
+        except Exception:
+            return False
+    return False
+
+
 def detect_project_type(src_dir, scan_mode):
     """Detect project type by looking for certain files
 
@@ -220,6 +226,15 @@ def detect_project_type(src_dir, scan_mode):
     else:
         project_types.append("credscan")
     depscan_supported = False
+    if (
+        "docker.io" in src_dir
+        or "quay.io" in src_dir
+        or ":latest" in src_dir
+        or "@sha256" in src_dir
+        or src_dir.endswith(".tar")
+        or src_dir.endswith(".tar.gz")
+    ):
+        project_types.append("docker")
     if find_files(src_dir, ".cls", False, True):
         project_types.append("apex")
     if find_python_reqfiles(src_dir) or find_files(src_dir, ".py", False, True):
@@ -282,13 +297,38 @@ def detect_project_type(src_dir, scan_mode):
     ):
         project_types.append("ruby")
         depscan_supported = True
+    if find_files(src_dir, "deps.edn", False, True) or find_files(
+        src_dir, "project.clj", False, True
+    ):
+        project_types.append("clojure")
+        depscan_supported = True
+    if find_files(src_dir, "conan.lock", False, True) or find_files(
+        src_dir, "conanfile.txt", False, True
+    ):
+        project_types.append("cpp")
+        depscan_supported = True
+    if find_files(src_dir, "pubspec.lock", False, True) or find_files(
+        src_dir, "pubspec.yaml", False, True
+    ):
+        project_types.append("dart")
+        depscan_supported = True
+    if find_files(src_dir, "cabal.project.freeze", False, True):
+        project_types.append("haskell")
+        depscan_supported = True
+    if find_files(src_dir, "mix.lock", False, True):
+        project_types.append("elixir")
+        depscan_supported = True
     if find_files(src_dir, "serverless.yml", False, True):
         project_types.append("serverless")
+    if find_files(src_dir, "Dockerfile", True, True):
+        project_types.append("dockerfile")
     if find_files(src_dir, "deploy.json", False, True) or find_files(
         src_dir, "parameters.json", False, True
     ):
         project_types.append("arm")
-    if find_files(src_dir, ".tf", False, True):
+    if find_files(src_dir, ".tf", False, True) or find_files(
+        src_dir, ".tf.json", False, True
+    ):
         project_types.append("terraform")
     if find_files(src_dir, ".yaml", False, True) or find_files(
         src_dir, ".yml", False, True
@@ -305,6 +345,10 @@ def detect_project_type(src_dir, scan_mode):
         depscan_supported = True
     if find_files(src_dir, ".sh", False, True):
         project_types.append("bash")
+    if is_exe(src_dir):
+        project_types.append("go")
+        project_types.append("binary")
+        depscan_supported = True
     if depscan_supported and scan_mode != "ide":
         project_types.append("depscan")
     return project_types
@@ -340,7 +384,7 @@ def get_workspace(repo_context):
     if not repo_context["repositoryUri"]:
         return None
     revision = repo_context.get("revisionId", repo_context.get("branch"))
-    if "github.com" in repo_context["repositoryUri"]:
+    if "github" in repo_context["repositoryUri"]:
         return "{}/blob/{}".format(repo_context["repositoryUri"], revision)
     if "gitlab" in repo_context["repositoryUri"]:
         return "{}/-/blob/{}".format(repo_context["repositoryUri"], revision)
@@ -410,6 +454,18 @@ def calculate_line_hash(filename, lineno, end_lineno, line, short_desc):
     )
     h = blake2b(digest_size=HASH_DIGEST_SIZE)
     h.update(snippet.encode())
+    return h.hexdigest()
+
+
+def to_fingerprint_hash(str_to_hash, digest_size):
+    """
+    Method to calculate fingerprint hash
+
+    :param str_to_hash: String to hash
+    :param digest_size: Digest size
+    """
+    h = blake2b(digest_size=digest_size)
+    h.update(str_to_hash.encode())
     return h.hexdigest()
 
 

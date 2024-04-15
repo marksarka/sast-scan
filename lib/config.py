@@ -1,18 +1,3 @@
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 import json
 import os
 import sys
@@ -155,6 +140,8 @@ ignore_directories = [
     "unittests_legacy",
     "stubs",
     "cypress",
+    "mock",
+    "mocks",
 ]
 
 # Ignore files list
@@ -164,7 +151,6 @@ ignore_files = [
     ".tar",
     ".tar.gz",
     ".tar",
-    ".md",
     ".log",
     ".tmp",
     ".bin",
@@ -182,10 +168,16 @@ ignore_files = [
     ".eslintrc.js",
     ".babelrc.js",
     ".spec.js",
+    ".spec.ts",
+    ".component.spec.js",
+    ".component.spec.ts",
     ".data.js",
+    ".data.ts",
     ".bundle.js",
     ".snap",
     ".pb.go",
+    ".tests.py",
+    ".vdb",
 ]
 
 # Tool specific ignored rules
@@ -195,6 +187,39 @@ TFSEC_IGNORED_RULES = (
 BANDIT_IGNORED_RULES = (
     "B101,B102,B105,B307,B308,B310,B322,B404,B601,B602,B603,B604,B605,B701,B702,B703"
 )
+
+
+# Suppression fingerprints
+def get_suppress_fingerprints(working_dir):
+    # To suppress based on fingerprint create a file called .sastscan.baseline in the root directory
+    # {"scanPrimaryLocationHash": [], "scanTagsHash": [], "scanFileHash": []}
+    suppress_fingerprints = {
+        "scanPrimaryLocationHash": [],
+        "scanTagsHash": [],
+        "scanFileHash": [],
+    }
+    # Search current working directory. If not use the directory specified in the container invocation
+    scanbaseline = os.path.join(os.getcwd(), ".sastscan.baseline")
+    if not os.path.exists(scanbaseline) and working_dir:
+        scanbaseline = os.path.join(working_dir, ".sastscan.baseline")
+    if not os.path.exists(scanbaseline) and get("SAST_SCAN_SRC_DIR"):
+        scanbaseline = os.path.join(get("SAST_SCAN_SRC_DIR"), ".sastscan.baseline")
+    if os.path.exists(scanbaseline):
+        with open(scanbaseline, "r") as baselinefile:
+            try:
+                baselinedata = json.loads(baselinefile.read())
+                # We are interested only in baseline_fingerprints in the baseline file
+                if baselinedata.get("baseline_fingerprints"):
+                    tmp_suppress_fingerprints = baselinedata.get(
+                        "baseline_fingerprints"
+                    )
+                    if tmp_suppress_fingerprints:
+                        suppress_fingerprints.update(tmp_suppress_fingerprints)
+                        set("suppress_fingerprints", suppress_fingerprints)
+                        return suppress_fingerprints
+            except Exception:
+                print(".sastscan.baseline should be a valid json file")
+    return suppress_fingerprints
 
 
 def get(configName, default_value=None):
@@ -207,7 +232,7 @@ def get(configName, default_value=None):
     try:
         value = runtimeValues.get(configName)
         if value is None:
-            value = os.environ.get(configName.upper())
+            value = os.environ.get(configName.replace("-", "_").upper())
         if value is None:
             value = getattr(sys.modules[__name__], configName, None)
         if value is None:
@@ -239,8 +264,8 @@ scan_tools_args_map = {
     "apex": {
         "source-apex": [
             *get("PMD_CMD").split(" "),
-            "-no-cache",
-            "--failOnViolation",
+            "--no-cache",
+            "--fail-on-violation",
             "false",
             "-language",
             "apex",
@@ -258,8 +283,10 @@ scan_tools_args_map = {
         "source-arm": [
             "checkov",
             "-s",
+            "--framework",
+            "arm",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -270,8 +297,10 @@ scan_tools_args_map = {
         "source-aws": [
             "checkov",
             "-s",
+            "--framework",
+            "cloudformation",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -281,30 +310,36 @@ scan_tools_args_map = {
     "bom": ["cdxgen", "-r", "-o", "%(report_fname_prefix)s.json", "%(src)s"],
     "credscan": [
         "gitleaks",
-        "--config=" + get("credscan_config"),
-        "--depth=" + get("credscan_depth"),
-        "--repo-path=%(src)s",
-        "--redact",
-        "--timeout=" + get("credscan_timeout"),
+        "--config-path=" + get("credscan_config"),
+        "--path=%(src)s",
+        "--leaks-exit-code=0",
+        "--no-git",
         "--report=%(report_fname_prefix)s.json",
-        "--report-format=json",
     ],
-    "credscan-raw": [
+    "credscan-git": [
         "gitleaks",
-        "--config=" + get("credscan_config"),
+        "--config-path=" + get("credscan_config"),
         "--depth=" + get("credscan_depth"),
-        "--repo-path=%(src)s",
+        "--path=%(src)s",
+        "--leaks-exit-code=0",
         "--report=%(report_fname_prefix)s.json",
-        "--report-format=json",
+    ],
+    "credscan-safe": [
+        "gitleaks",
+        "--config-path=" + get("credscan_config"),
+        "--path=%(src)s",
+        "--leaks-exit-code=0",
+        "--redact",
+        "--no-git",
+        "--report=%(report_fname_prefix)s.json",
     ],
     "credscan-ide": [
         "gitleaks",
-        "--config=" + get("credscan_config"),
-        "--uncommitted",
-        "--repo-path=%(src)s",
-        "--timeout=" + get("credscan_timeout"),
+        "--config-path=" + get("credscan_config"),
+        "--unstaged",
+        "--path=%(src)s",
+        "--leaks-exit-code=0",
         "--report=%(report_fname_prefix)s.json",
-        "--report-format=json",
     ],
     "bash": [
         "shellcheck",
@@ -326,6 +361,73 @@ scan_tools_args_map = {
         "--report_file",
         "%(report_fname_prefix)s.json",
     ],
+    "docker": {
+        "image-docker": [
+            get("DEPSCAN_CMD"),
+            "--no-banner",
+            "--suggest",
+            "-t",
+            "docker",
+            "--src",
+            "%(src)s",
+            "--report_file",
+            "%(report_fname_prefix)s.json",
+        ]
+    },
+    "podman": {
+        "image-podman": [
+            get("DEPSCAN_CMD"),
+            "--no-banner",
+            "--suggest",
+            "-t",
+            "docker",
+            "--src",
+            "%(src)s",
+            "--report_file",
+            "%(report_fname_prefix)s.json",
+        ]
+    },
+    "container": {
+        "image-container": [
+            get("DEPSCAN_CMD"),
+            "--no-banner",
+            "--suggest",
+            "-t",
+            "docker",
+            "--src",
+            "%(src)s",
+            "--report_file",
+            "%(report_fname_prefix)s.json",
+        ]
+    },
+    "dockerfile": {
+        "source-dockerfile": [
+            "checkov",
+            "-s",
+            "--framework",
+            "dockerfile",
+            "--quiet",
+            "--skip-download",
+            "-o",
+            "json",
+            "-d",
+            "%(src)s",
+        ]
+    },
+    "containerfile": {
+        "source-containerfile": [
+            "checkov",
+            "-s",
+            "--framework",
+            "dockerfile",
+            "--quiet",
+            "--skip-download",
+            "-o",
+            "json",
+            "-d",
+            "%(src)s",
+        ]
+    },
     "go": {
         "source-go": [
             "gosec",
@@ -341,8 +443,8 @@ scan_tools_args_map = {
     "jsp": {
         "source-jsp": [
             *get("PMD_CMD").split(" "),
-            "-no-cache",
-            "--failOnViolation",
+            "--no-cache",
+            "--fail-on-violation",
             "false",
             "-language",
             "jsp",
@@ -415,8 +517,10 @@ scan_tools_args_map = {
         "source-k8s": [
             "checkov",
             "-s",
+            "--framework",
+            "kubernetes",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -436,8 +540,8 @@ scan_tools_args_map = {
     "plsql": {
         "source-sql": [
             *get("PMD_CMD").split(" "),
-            "-no-cache",
-            "--failOnViolation",
+            "--no-cache",
+            "--fail-on-violation",
             "false",
             "-language",
             "plsql",
@@ -588,8 +692,10 @@ scan_tools_args_map = {
         "source-tf": [
             "checkov",
             "-s",
+            "--framework",
+            "terraform",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -609,8 +715,10 @@ scan_tools_args_map = {
         "source-tf": [
             "checkov",
             "-s",
+            "--framework",
+            "terraform",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -620,8 +728,8 @@ scan_tools_args_map = {
     "vf": {
         "source-vf": [
             *get("PMD_CMD").split(" "),
-            "-no-cache",
-            "--failOnViolation",
+            "--no-cache",
+            "--fail-on-violation",
             "false",
             "-language",
             "vf",
@@ -638,8 +746,8 @@ scan_tools_args_map = {
     "vm": {
         "source-vm": [
             *get("PMD_CMD").split(" "),
-            "-no-cache",
-            "--failOnViolation",
+            "--no-cache",
+            "--fail-on-violation",
             "false",
             "-language",
             "vm",
@@ -657,8 +765,10 @@ scan_tools_args_map = {
         "source-serverless": [
             "checkov",
             "-s",
+            "--framework",
+            "serverless",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -670,8 +780,10 @@ scan_tools_args_map = {
         "source-yaml": [
             "checkov",
             "-s",
+            "--framework",
+            "kubernetes",
             "--quiet",
-            "--no-guide",
+            "--skip-download",
             "-o",
             "json",
             "-d",
@@ -705,7 +817,7 @@ build_tools_map = {
         "sbt": ["sbt", "compile"],
     },
     "nodejs": {
-        "npm": ["npm", "install"],
+        "npm": ["npm", "install", "--prefer-offline", "--no-audit", "--progress=false"],
         "yarn": ["yarn", "install"],
         "rush": ["rush", "install", "--bypass-policy", "--no-link"],
     },
@@ -736,6 +848,11 @@ tool_purpose_message = {
     "checkov": "Security Audit for Infrastructure",
     "source-aws": "Security Audit for AWS",
     "source-arm": "Security Audit for Azure Resource Manager",
+    "source-containerfile": "Containerfile Security Audit",
+    "source-dockerfile": "Dockerfile Security Audit",
+    "image-container": "Container Image Audit",
+    "image-docker": "Container Image Audit",
+    "image-podman": "Container Image Audit",
     "source-k8s": "Kubernetes Security Audit",
     "source-kt": "Kotlin Static Analysis",
     "audit-kt": "Kotlin Security Audit",
@@ -745,7 +862,7 @@ tool_purpose_message = {
     "source-tf": "Terraform Security Audit",
     "source-yaml": "Security Audit for IaC",
     "staticcheck": "Go Static Analysis",
-    "source": "Source Aode Analyzer",
+    "source": "Source Code Analyzer",
     "source-java": "Java Source Analyzer",
     "source-python": "Python Source Analyzer",
     "source-php": "PHP Source Analyzer",
@@ -1015,6 +1132,14 @@ rules_severity = {
     "CKV_AZURE_2": "CRITICAL",
     "CKV_AZURE_11": "CRITICAL",
     "CKV_AZURE_34": "CRITICAL",
+    "CKV_DOCKER_1": "CRITICAL",
+    "CKV_DOCKER_2": "LOW",
+    "CKV_DOCKER_3": "LOW",
+    "CKV_DOCKER_4": "HIGH",
+    "CKV_DOCKER_5": "HIGH",
+    "CKV_DOCKER_6": "LOW",
+    "CKV_DOCKER_7": "LOW",
+    "CKV_DOCKER_8": "HIGH",
     "CKV_GCP_5": "CRITICAL",
     "CKV_GCP_15": "CRITICAL",
     "CKV_GCP_18": "CRITICAL",
@@ -1029,6 +1154,11 @@ rules_severity = {
     "CKV_K8S_4": "CRITICAL",
     "CKV_K8S_5": "CRITICAL",
     "CKV_K8S_6": "CRITICAL",
+    "CKV_K8S_10": "LOW",
+    "CKV_K8S_11": "LOW",
+    "CKV_K8S_12": "LOW",
+    "CKV_K8S_13": "LOW",
+    "CKV_K8S_49": "LOW",
     "S1005": "LOW",
     "ST1005": "LOW",
     "SA1019": "LOW",
@@ -1044,6 +1174,78 @@ rules_severity = {
     "B201": "LOW",
     "TEMPLATE_INJECTION_FREEMARKER": "MEDIUM",
     "UNVALIDATED_REDIRECT": "MEDIUM",
+    "BasicAuth": "MEDIUM",
+    "BasicAuthTimingAttack": "MEDIUM",
+    "CSRFTokenForgeryCVE": "CRITICAL",
+    "ContentTag": "MEDIUM",
+    "CookieSerialization": "LOW",
+    "CreateWith": "LOW",
+    "CrossSiteScripting": "CRITICAL",
+    "DefaultRoutes": "MEDIUM",
+    "Deserialize": "HIGH",
+    "DetailedExceptions": "MEDIUM",
+    "DigestDoS": "HIGH",
+    "DynamicFinders": "CRITICAL",
+    "EscapeFunction": "MEDIUM",
+    "Evaluation": "CRITICAL",
+    "Execute": "CRITICAL",
+    "FileAccess": "MEDIUM",
+    "FileDisclosure": "HIGH",
+    "FilterSkipping": "MEDIUM",
+    "ForgerySetting": "MEDIUM",
+    "HeaderDoS": "HIGH",
+    "I18nXSS": "MEDIUM",
+    "JRubyXML": "MEDIUM",
+    "JSONEncoding": "MEDIUM",
+    "JSONEntityEscape": "MEDIUM",
+    "JSONParsing": "CRITICAL",
+    "LinkTo": "MEDIUM",
+    "LinkToHref": "MEDIUM",
+    "MailTo": "MEDIUM",
+    "MassAssignment": "MEDIUM",
+    "MimeTypeDoS": "HIGH",
+    "ModelAttrAccessible": "LOW",
+    "ModelAttributes": "MEDIUM",
+    "ModelSerialize": "MEDIUM",
+    "NestedAttributes": "LOW",
+    "NestedAttributesBypass": "LOW",
+    "NumberToCurrency": "LOW",
+    "PageCachingCVE": "MEDIUM",
+    "PermitAttributes": "LOW",
+    "QuoteTableName": "MEDIUM",
+    "Redirect": "MEDIUM",
+    "RegexDoS": "HIGH",
+    "Render": "MEDIUM",
+    "RenderDoS": "MEDIUM",
+    "RenderInline": "LOW",
+    "ResponseSplitting": "MEDIUM",
+    "RouteDoS": "HIGH",
+    "SQL": "CRITICAL",
+    "SQLCVEs": "CRITICAL",
+    "SSLVerify": "MEDIUM",
+    "SafeBufferManipulation": "LOW",
+    "SanitizeMethods": "MEDIUM",
+    "SelectTag": "MEDIUM",
+    "SelectVulnerability": "HIGH",
+    "Send": "MEDIUM",
+    "SendFile": "MEDIUM",
+    "SessionManipulation": "HIGH",
+    "SessionSettings": "MEDIUM",
+    "SimpleFormat": "LOW",
+    "SingleQuotes": "LOW",
+    "SkipBeforeFilter": "MEDIUM",
+    "SprocketsPathTraversal": "MEDIUM",
+    "StripTags": "LOW",
+    "SymbolDoSCVE": "HIGH",
+    "TemplateInjection": "HIGH",
+    "TranslateBug": "MEDIUM",
+    "UnsafeReflection": "LOW",
+    "UnsafeReflectionMethods": "LOW",
+    "ValidationRegex": "LOW",
+    "VerbConfusion": "LOW",
+    "WithoutProtection": "MEDIUM",
+    "XMLDoS": "HIGH",
+    "YAMLParsing": "MEDIUM",
 }
 
 
@@ -1057,18 +1259,26 @@ class Cwe(object):
     SQL_INJECTION = 89
     CODE_INJECTION = 94
     IMPROPER_WILDCARD_NEUTRALIZATION = 155
+    INCORRECT_REGEX = 185
+    INFORMATION_DISCLOSURE = 200
     HARD_CODED_PASSWORD = 259
     IMPROPER_ACCESS_CONTROL = 284
+    IMPROPER_AUTHENTICATION = 287
     IMPROPER_CERT_VALIDATION = 295
     CLEARTEXT_TRANSMISSION = 319
     INADEQUATE_ENCRYPTION_STRENGTH = 326
     BROKEN_CRYPTO = 327
     INSUFFICIENT_RANDOM_VALUES = 330
+    CSRF = 352
     INSECURE_TEMP_FILE = 377
+    SESSION_FIXATION = 384
+    IMPROPER_RESOURCE_MANAGEMENT = 399
     DESERIALIZATION_OF_UNTRUSTED_DATA = 502
+    OPEN_REDIRECT = 601
     MULTIPLE_BINDS = 605
     IMPROPER_CHECK_OF_EXCEPT_COND = 703
     INCORRECT_PERMISSION_ASSIGNMENT = 732
+    MASS_ASSIGNMENT = 915
 
     MITRE_URL_PATTERN = "https://cwe.mitre.org/data/definitions/%s.html"
 
@@ -1182,6 +1392,78 @@ CWEMAP = {
     "B412": Cwe.IMPROPER_ACCESS_CONTROL,
     "B413": Cwe.BROKEN_CRYPTO,
     "B414": Cwe.BROKEN_CRYPTO,
+    "BasicAuth": Cwe.IMPROPER_AUTHENTICATION,
+    "BasicAuthTimingAttack": Cwe.IMPROPER_AUTHENTICATION,
+    "CSRFTokenForgeryCVE": Cwe.CSRF,
+    "ContentTag": Cwe.IMPROPER_INPUT_VALIDATION,
+    "CookieSerialization": Cwe.DESERIALIZATION_OF_UNTRUSTED_DATA,
+    "CreateWith": Cwe.MASS_ASSIGNMENT,
+    "CrossSiteScripting": Cwe.XSS,
+    "DefaultRoutes": Cwe.PATH_TRAVERSAL,
+    "Deserialize": Cwe.DESERIALIZATION_OF_UNTRUSTED_DATA,
+    "DetailedExceptions": Cwe.INFORMATION_DISCLOSURE,
+    "DigestDoS": Cwe.IMPROPER_AUTHENTICATION,
+    "DynamicFinders": Cwe.SQL_INJECTION,
+    "EscapeFunction": Cwe.BASIC_XSS,
+    "Evaluation": Cwe.CODE_INJECTION,
+    "Execute": Cwe.OS_COMMAND_INJECTION,
+    "FileAccess": Cwe.PATH_TRAVERSAL,
+    "FileDisclosure": Cwe.PATH_TRAVERSAL,
+    "FilterSkipping": Cwe.IMPROPER_INPUT_VALIDATION,
+    "ForgerySetting": Cwe.CSRF,
+    "HeaderDoS": Cwe.IMPROPER_INPUT_VALIDATION,
+    "I18nXSS": Cwe.BASIC_XSS,
+    "JRubyXML": Cwe.PATH_TRAVERSAL,
+    "JSONEncoding": Cwe.BASIC_XSS,
+    "JSONEntityEscape": Cwe.BASIC_XSS,
+    "JSONParsing": Cwe.OS_COMMAND_INJECTION,
+    "LinkTo": Cwe.BASIC_XSS,
+    "LinkToHref": Cwe.BASIC_XSS,
+    "MailTo": Cwe.BASIC_XSS,
+    "MassAssignment": Cwe.MASS_ASSIGNMENT,
+    "MimeTypeDoS": Cwe.IMPROPER_RESOURCE_MANAGEMENT,
+    "ModelAttrAccessible": Cwe.DESERIALIZATION_OF_UNTRUSTED_DATA,
+    "ModelAttributes": Cwe.DESERIALIZATION_OF_UNTRUSTED_DATA,
+    "ModelSerialize": Cwe.OS_COMMAND_INJECTION,
+    "NestedAttributes": Cwe.IMPROPER_INPUT_VALIDATION,
+    "NestedAttributesBypass": Cwe.IMPROPER_ACCESS_CONTROL,
+    "NumberToCurrency": Cwe.BASIC_XSS,
+    "PageCachingCVE": Cwe.PATH_TRAVERSAL,
+    "PermitAttributes": Cwe.DESERIALIZATION_OF_UNTRUSTED_DATA,
+    "QuoteTableName": Cwe.SQL_INJECTION,
+    "Redirect": Cwe.OPEN_REDIRECT,
+    "RegexDoS": Cwe.INCORRECT_REGEX,
+    "Render": Cwe.PATH_TRAVERSAL,
+    "RenderDoS": Cwe.IMPROPER_INPUT_VALIDATION,
+    "RenderInline": Cwe.BASIC_XSS,
+    "ResponseSplitting": Cwe.CODE_INJECTION,
+    "RouteDoS": Cwe.IMPROPER_RESOURCE_MANAGEMENT,
+    "SQL": Cwe.SQL_INJECTION,
+    "SQLCVEs": Cwe.SQL_INJECTION,
+    "SSLVerify": Cwe.IMPROPER_CERT_VALIDATION,
+    "SafeBufferManipulation": Cwe.BASIC_XSS,
+    "SanitizeMethods": Cwe.BASIC_XSS,
+    "SelectTag": Cwe.BASIC_XSS,
+    "SelectVulnerability": Cwe.BASIC_XSS,
+    "Send": Cwe.IMPROPER_INPUT_VALIDATION,
+    "SendFile": Cwe.IMPROPER_INPUT_VALIDATION,
+    "SessionManipulation": Cwe.SESSION_FIXATION,
+    "SessionSettings": Cwe.SESSION_FIXATION,
+    "SimpleFormat": Cwe.BASIC_XSS,
+    "SingleQuotes": Cwe.BASIC_XSS,
+    "SkipBeforeFilter": Cwe.CSRF,
+    "SprocketsPathTraversal": Cwe.PATH_TRAVERSAL,
+    "StripTags": Cwe.BASIC_XSS,
+    "SymbolDoSCVE": Cwe.IMPROPER_INPUT_VALIDATION,
+    "TemplateInjection": Cwe.CODE_INJECTION,
+    "TranslateBug": Cwe.BASIC_XSS,
+    "UnsafeReflection": Cwe.IMPROPER_INPUT_VALIDATION,
+    "UnsafeReflectionMethods": Cwe.IMPROPER_INPUT_VALIDATION,
+    "ValidationRegex": Cwe.IMPROPER_INPUT_VALIDATION,
+    "VerbConfusion": Cwe.IMPROPER_INPUT_VALIDATION,
+    "WithoutProtection": Cwe.MASS_ASSIGNMENT,
+    "XMLDoS": Cwe.OS_COMMAND_INJECTION,
+    "YAMLParsing": Cwe.OS_COMMAND_INJECTION,
 }
 
 # Mapping of rules and owasp category
@@ -1200,7 +1482,9 @@ rules_owasp_category = {
     "CWE-94": "a1-injection",
     "CWE-155": "a1-injection",
     "CWE-117": "a3-sensitive-data-exposure",
+    "CWE-185": "a6-misconfiguration",
     "CWE-203": "a3-sensitive-data-exposure",
+    "CWE-159": "a1-injection",
     "CWE-259": "a3-sensitive-data-exposure",
     "CWE-284": "a5-broken-access-control",
     "CWE-295": "a3-sensitive-data-exposure",
@@ -1209,12 +1493,14 @@ rules_owasp_category = {
     "CWE-327": "a3-sensitive-data-exposure",
     "CWE-330": "a2-broken-authentication",
     "CWE-377": "a6-misconfiguration",
+    "CWE-384": "a5-broken-access-control",
     "CWE-502": "a8-deserialization",
     "CWE-601": "a6-misconfiguration",
     "CWE-605": "a6-misconfiguration",
     "CWE-644": "a6-misconfiguration",
     "CWE-703": "a6-misconfiguration",
     "CWE-732": "a6-misconfiguration",
+    "CWE-915": "a6-misconfiguration",
     "CWE-918": "a6-misconfiguration",
     "rce": "a1-injection",
     "taint-rce": "a1-injection",
@@ -1228,6 +1514,7 @@ rules_owasp_category = {
     "taint-basic-xss": "a7-xss",
     "taint-broken-access-control": "a5-broken-access-control",
     "taint-file-write": "a5-broken-access-control",
+    "taint-file-write-session": "a5-broken-access-control",
     "taint-traversal": "a5-broken-access-control",
     "taint-ssrf": "a6-misconfiguration",
     "taint-open-redirect": "a6-misconfiguration",
@@ -1240,6 +1527,7 @@ rules_owasp_category = {
     "sqli": "a1-injection",
     "nosqli": "a1-injection",
     "xmli": "a1-injection",
+    "taint-mail": "a1-injection",
     "xss": "a7-xss",
     "basic-xss": "a7-xss",
     "broken-access-control": "a5-broken-access-control",
@@ -1258,6 +1546,7 @@ rules_owasp_category = {
 # Build break rules. Depscan tool supports required and optional keys to distinguish between packages based on usage scope
 build_break_rules = {
     "default": {"max_critical": 0, "max_high": 2, "max_medium": 5},
+    "Secrets Audit": {"max_critical": 0, "max_high": 0, "max_medium": 1},
     "depscan": {
         "max_critical": 0,
         "max_required_critical": 0,
@@ -1292,15 +1581,20 @@ exttool_default_severity = {"brakeman": "medium"}
 
 def reload():
     # Load any .sastscanrc file from the root
-    if get("SAST_SCAN_SRC_DIR"):
+    scanrc = os.path.join(os.getcwd(), ".sastscanrc")
+    if not os.path.exists(scanrc) and get("SAST_SCAN_SRC_DIR"):
         scanrc = os.path.join(get("SAST_SCAN_SRC_DIR"), ".sastscanrc")
-        if os.path.exists(scanrc):
-            with open(scanrc, "r") as rcfile:
+    if os.path.exists(scanrc):
+        with open(scanrc, "r") as rcfile:
+            try:
+                print("Overriding the config with .sastscanrc")
                 new_config = json.loads(rcfile.read())
                 for key, value in new_config.items():
                     exis_config = get(key)
                     if isinstance(exis_config, dict):
-                        exis_config = exis_config.update(value)
+                        exis_config.update(value)
                         set(key, exis_config)
                     else:
                         set(key, value)
+            except Exception:
+                print(".sastscanrc should be a valid json file")

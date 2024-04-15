@@ -1,18 +1,3 @@
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 import io
 import os
 import subprocess
@@ -96,6 +81,7 @@ def exec_tool(  # scan:ignore
     """
     with Progress(
         console=console,
+        transient=True,
         redirect_stderr=False,
         redirect_stdout=False,
         refresh_per_second=1,
@@ -103,7 +89,10 @@ def exec_tool(  # scan:ignore
         task = None
         try:
             env = use_java(env)
-            LOG.debug('⚡︎ Executing {} "{}"'.format(tool_name, " ".join(args)))
+            if tool_name == "NG SAST":
+                LOG.debug("⚡︎ Performing ShiftLeft NG SAST analysis")
+            else:
+                LOG.debug('⚡︎ Executing {} "{}"'.format(tool_name, " ".join(args)))
             stderr = subprocess.DEVNULL
             if LOG.isEnabledFor(DEBUG):
                 stderr = subprocess.STDOUT
@@ -208,7 +197,7 @@ def execute_default_cmd(  # scan:ignore
         stdout = None
     if reports_dir and report_fname_prefix not in default_cmd:
         report_fname = report_fname_prefix + outext
-        stdout = io.open(report_fname, "w")
+        stdout = io.open(report_fname, "w", encoding="utf-8")
         LOG.debug("Output will be written to {}".format(report_fname))
 
     # If the command is requesting list of files then construct the argument
@@ -218,6 +207,11 @@ def execute_default_cmd(  # scan:ignore
         ei = default_cmd.find(")", si + 10)
         ext = default_cmd[si + 10 : ei]
         filelist = utils.find_files(src, ext)
+        # Temporary fix for the yaml issue
+        if ext == "yaml":
+            yml_list = utils.find_files(src, "yml")
+            if yml_list:
+                filelist.extend(yml_list)
         delim = " "
         default_cmd = default_cmd.replace(
             filelist_prefix + ext + ")", delim.join(filelist)
@@ -226,7 +220,12 @@ def execute_default_cmd(  # scan:ignore
     # Suppress psalm output
     if should_suppress_output(type_str, cmd_with_args[0]):
         stdout = subprocess.DEVNULL
-    exec_tool(tool_name, cmd_with_args, cwd=src, stdout=stdout)
+    exec_tool(
+        tool_name,
+        cmd_with_args,
+        cwd=os.getcwd() if "image" in tool_name else src,
+        stdout=stdout,
+    )
     # Should we attempt to convert the report to sarif format
     if should_convert(convert, tool_name, cmd_with_args[0], report_fname):
         crep_fname = utils.get_report_file(

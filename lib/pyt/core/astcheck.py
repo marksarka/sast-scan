@@ -12,7 +12,6 @@ if PY3:
     def mkarg(name):
         return ast.arg(arg=name)
 
-
 else:
 
     def mkarg(name):
@@ -211,6 +210,9 @@ def assert_ast_like(sample, template, _path=None):
         if not hasattr(sample, name):
             continue
         sample_field = getattr(sample, name)
+        # Python 3.9 fix
+        if isinstance(sample, ast.ImportFrom) and sample_field == 0 and name == "level":
+            sample_field = None
         field_path = _path + [name]
 
         if isinstance(template_field, list):

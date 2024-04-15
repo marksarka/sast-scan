@@ -1,17 +1,3 @@
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import os
 
@@ -228,17 +214,11 @@ def inspect_scan(language, src, reports_dir, convert, repo_context):
             "Unable to find any build artifacts. Compile your project first before invoking scan or use the auto build feature."
         )
         return
-    if isinstance(analyze_files, list) and len(analyze_files) > 1:
-        LOG.warning(
-            "Multiple files found in {}. Only {} will be analyzed".format(
-                analyze_target_dir, analyze_files[0]
-            )
-        )
+    if isinstance(analyze_files, list):
         analyze_files = analyze_files[0]
     sl_args = [
         sl_cmd,
         "analyze",
-        "--no-auto-update" if language == "java" else None,
         "--wait",
         "--cpg" if cpg_mode else None,
         "--" + language,
@@ -247,7 +227,7 @@ def inspect_scan(language, src, reports_dir, convert, repo_context):
         "--app",
         app_name,
     ]
-    sl_args += [analyze_files]
+    sl_args.append(analyze_files)
     if extra_args:
         sl_args += extra_args
     sl_args = [arg for arg in sl_args if arg is not None]
@@ -256,7 +236,7 @@ def inspect_scan(language, src, reports_dir, convert, repo_context):
     )
     LOG.debug(" ".join(sl_args))
     LOG.debug(repo_context)
-    cp = exec_tool("NG SAST", sl_args, src, env=env)
+    cp = exec_tool("ng-sast", sl_args, src, env=env)
     if cp.returncode != 0:
         LOG.warning("NG SAST cloud analyze has failed with the below logs")
         LOG.debug(sl_args)
@@ -320,7 +300,7 @@ def convert_sarif(app_name, repo_context, sarif_files, findings_fname):
     findings_list = []
     rule_id_owasp_cache = {}
     for sf in sarif_files:
-        with open(sf, mode="r") as report_file:
+        with open(sf, mode="r", encoding="utf-8") as report_file:
             report_data = None
             try:
                 report_data = json.loads(report_file.read())
@@ -397,7 +377,17 @@ def convert_sarif(app_name, repo_context, sarif_files, findings_fname):
                                             "shiftleft_managed": False,
                                         }
                                     )
-
+                        # If there are any tags specified in the issue use them
+                        issue_tags = result.get("properties", {}).get("issue_tags")
+                        if issue_tags:
+                            for ik, iv in issue_tags.items():
+                                tags.append(
+                                    {
+                                        "key": ik,
+                                        "value": iv,
+                                        "shiftleft_managed": False,
+                                    }
+                                )
                         for location in result.get("locations"):
                             filename = location["physicalLocation"]["artifactLocation"][
                                 "uri"
@@ -410,6 +400,30 @@ def convert_sarif(app_name, repo_context, sarif_files, findings_fname):
                                 .get("contextRegion", {})
                                 .get("endLine")
                             )
+                            line_hash = utils.calculate_line_hash(
+                                filename,
+                                lineno,
+                                end_lineno,
+                                location.get("physicalLocation", {})
+                                .get("region", {})
+                                .get("snippet", {})
+                                .get("text", ""),
+                                short_desc,
+                            )
+                            finding_hash = line_hash
+                            # Use the modern hash
+                            if config.get("USE_NEW_FINDING_HASH") and result.get(
+                                "partialFingerprints"
+                            ):
+                                partialFingerprints = result.get("partialFingerprints")
+                                if partialFingerprints.get("scanTagsHash"):
+                                    finding_hash = partialFingerprints.get(
+                                        "scanTagsHash"
+                                    )
+                                elif partialFingerprints.get("scanPrimaryLocationHash"):
+                                    finding_hash = partialFingerprints.get(
+                                        "scanPrimaryLocationHash"
+                                    )
                             finding = {
                                 "app": app_name,
                                 "type": "extscan",
@@ -417,16 +431,7 @@ def convert_sarif(app_name, repo_context, sarif_files, findings_fname):
                                 "description": desc,
                                 "internal_id": "{}/{}".format(
                                     rule_id,
-                                    utils.calculate_line_hash(
-                                        filename,
-                                        lineno,
-                                        end_lineno,
-                                        location.get("physicalLocation", {})
-                                        .get("region", {})
-                                        .get("snippet", {})
-                                        .get("text", ""),
-                                        short_desc,
-                                    ),
+                                    finding_hash,
                                 ),
                                 "severity": ngsev,
                                 "owasp_category": owasp_category,

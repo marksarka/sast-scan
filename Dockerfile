@@ -1,112 +1,91 @@
-FROM shiftleft/scan-base as builder
+FROM ubuntu:jammy as scan-base
 
+# This section of the multi-stage build is used to build the final Scan image
+# We install all building dependencies, run the process of getting and compiling additional tools and then
+# use an also ubuntu version in the next stage to only get the obtained tools.
 ARG CLI_VERSION
 ARG BUILD_DATE
+ARG ARCH
 
-ENV GOSEC_VERSION=2.4.0 \
-    TFSEC_VERSION=0.25.0 \
-    KUBESEC_VERSION=2.6.0 \
-    KUBE_SCORE_VERSION=1.7.2 \
-    SHELLCHECK_VERSION=0.7.1 \
-    DETEKT_VERSION=1.14.2 \
-    GITLEAKS_VERSION=4.3.1 \
-    GRADLE_VERSION=6.5.1 \
-    GRADLE_HOME=/opt/gradle-${GRADLE_VERSION} \
-    MAVEN_VERSION=3.6.3 \
-    MAVEN_HOME=/opt/apache-maven-${MAVEN_VERSION} \
-    SC_VERSION=2020.1.6 \
-    PMD_VERSION=6.29.0 \
-    PMD_CMD="/opt/pmd-bin-${PMD_VERSION}/bin/run.sh pmd" \
-    JQ_VERSION=1.6 \
-    FSB_VERSION=1.10.1 \
-    SB_CONTRIB_VERSION=7.4.7 \
-    SB_VERSION=4.1.4 \
-    GOPATH=/opt/app-root/go \
-    SHIFTLEFT_HOME=/opt/sl-cli \
-    PATH=${PATH}:${GRADLE_HOME}/bin:${GOPATH}/bin:
+ENV GOPATH=/opt/app-root/go \
+    GO_VERSION=1.21 \
+    PATH=${PATH}:${GOPATH}/bin:/usr/local/go/bin:
 
-USER root
-
-RUN mkdir -p /usr/local/bin/shiftleft \
-    && curl -LO "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/gosec_${GOSEC_VERSION}_linux_amd64.tar.gz" \
-    && tar -C /usr/local/bin/shiftleft/ -xvf gosec_${GOSEC_VERSION}_linux_amd64.tar.gz \
-    && chmod +x /usr/local/bin/shiftleft/gosec \
-    && rm gosec_${GOSEC_VERSION}_linux_amd64.tar.gz
-RUN curl -LO "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-    && unzip -q gradle-${GRADLE_VERSION}-bin.zip -d /opt/ \
-    && chmod +x /opt/gradle-${GRADLE_VERSION}/bin/gradle \
-    && rm gradle-${GRADLE_VERSION}-bin.zip \
-    && curl -LO "https://downloads.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.zip" \
-    && unzip -q apache-maven-${MAVEN_VERSION}-bin.zip -d /opt/ \
-    && chmod +x /opt/apache-maven-${MAVEN_VERSION}/bin/mvn \
-    && rm apache-maven-${MAVEN_VERSION}-bin.zip \
-    && curl -LO "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
-    && tar -C /tmp/ -xvf shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz \
-    && cp /tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck /usr/local/bin/shiftleft/shellcheck \
-    && chmod +x /usr/local/bin/shiftleft/shellcheck \
-    && curl -LO "https://github.com/dominikh/go-tools/releases/download/${SC_VERSION}/staticcheck_linux_amd64.tar.gz" \
-    && tar -C /tmp -xvf staticcheck_linux_amd64.tar.gz \
-    && chmod +x /tmp/staticcheck/staticcheck \
-    && cp /tmp/staticcheck/staticcheck /usr/local/bin/shiftleft/staticcheck \
-    && rm staticcheck_linux_amd64.tar.gz
-RUN curl -L "https://github.com/zricethezav/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks-linux-amd64" -o "/usr/local/bin/shiftleft/gitleaks" \
-    && chmod +x /usr/local/bin/shiftleft/gitleaks \
-    && curl -L "https://github.com/liamg/tfsec/releases/download/v${TFSEC_VERSION}/tfsec-linux-amd64" -o "/usr/local/bin/shiftleft/tfsec" \
-    && chmod +x /usr/local/bin/shiftleft/tfsec \
-    && rm shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz
-RUN curl -L "https://github.com/zegl/kube-score/releases/download/v${KUBE_SCORE_VERSION}/kube-score_${KUBE_SCORE_VERSION}_linux_amd64" -o "/usr/local/bin/shiftleft/kube-score" \
-    && chmod +x /usr/local/bin/shiftleft/kube-score \
-    && wget "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-bin-${PMD_VERSION}.zip" \
-    && unzip -q pmd-bin-${PMD_VERSION}.zip -d /opt/ \
-    && rm pmd-bin-${PMD_VERSION}.zip \
-    && curl -L "https://github.com/stedolan/jq/releases/download/jq-${JQ_VERSION}/jq-linux64" -o "/usr/local/bin/shiftleft/jq" \
-    && chmod +x /usr/local/bin/shiftleft/jq
-RUN curl -L "https://github.com/detekt/detekt/releases/download/v${DETEKT_VERSION}/detekt-cli-${DETEKT_VERSION}-all.jar" -o "/usr/local/bin/shiftleft/detekt-cli.jar" \
-    && curl -LO "https://github.com/controlplaneio/kubesec/releases/download/v${KUBESEC_VERSION}/kubesec_linux_amd64.tar.gz" \
-    && tar -C /usr/local/bin/shiftleft/ -xvf kubesec_linux_amd64.tar.gz \
-    && rm kubesec_linux_amd64.tar.gz \
-    && curl -LO "https://github.com/spotbugs/spotbugs/releases/download/${SB_VERSION}/spotbugs-${SB_VERSION}.tgz" \
-    && tar -C /opt/ -xvf spotbugs-${SB_VERSION}.tgz \
-    && rm spotbugs-${SB_VERSION}.tgz \
-    && curl -LO "https://repo1.maven.org/maven2/com/h3xstream/findsecbugs/findsecbugs-plugin/${FSB_VERSION}/findsecbugs-plugin-${FSB_VERSION}.jar" \
-    && mv findsecbugs-plugin-${FSB_VERSION}.jar /opt/spotbugs-${SB_VERSION}/plugin/findsecbugs-plugin.jar \
-    && curl -LO "https://repo1.maven.org/maven2/com/mebigfatguy/sb-contrib/sb-contrib/${SB_CONTRIB_VERSION}/sb-contrib-${SB_CONTRIB_VERSION}.jar" \
-    && mv sb-contrib-${SB_CONTRIB_VERSION}.jar /opt/spotbugs-${SB_VERSION}/plugin/sb-contrib.jar \
-    && curl "https://cdn.shiftleft.io/download/sl" > /usr/local/bin/shiftleft/sl \
-    && chmod a+rx /usr/local/bin/shiftleft/sl
-
-FROM shiftleft/scan-base-slim as sast-scan-tools
-
-LABEL maintainer="ShiftLeftSecurity" \
+LABEL maintainer="qwiet.ai" \
       org.label-schema.schema-version="1.0" \
-      org.label-schema.vendor="shiftleft" \
-      org.label-schema.name="sast-scan" \
+      org.label-schema.vendor="qwiet.ai" \
+      org.label-schema.name="scan-base" \
       org.label-schema.version=$CLI_VERSION \
       org.label-schema.license="GPL-3.0-or-later" \
+      org.label-schema.description="Base image containing multiple programming languages" \
+      org.label-schema.url="https://qwiet.ai" \
+      org.label-schema.usage="https://github.com/ShiftLeftSecurity/sast-scan" \
+      org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.vcs-url="https://github.com/ShiftLeftSecurity/sast-scan.git" \
+      org.label-schema.docker.cmd="docker run --rm -it --name scan-base shiftleft/scan-base /bin/bash"
+
+RUN echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/00-docker
+RUN echo 'APT::Install-Recommends "0";' >> /etc/apt/apt.conf.d/00-docker
+
+COPY appimage-reqs.sh /
+COPY building_env.sh /
+COPY dynamic-lang.sh /
+COPY requirements.txt /
+COPY scan /usr/local/src/
+COPY lib /usr/local/src/lib
+COPY tools_config/ /usr/local/src/
+
+USER root
+# this ensures there will be no pre-deletion of app folder.
+ENV KEEP_BUILD_ARTIFACTS=true
+ENV ARCH=$ARCH
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Dependencies for scan, many of these are only necessary to compile/initialize the tools
+RUN apt-get update && apt-get install -y  python3 python3-dev \
+        python3-pip python3-setuptools patchelf \
+        php php-curl php-zip php-bcmath php-json \
+        php-pear php-mbstring php-dev php-xml wget curl git unzip
+
+# Use the same script as we would use locally, for consistency
+RUN /appimage-reqs.sh /
+
+# We remove packages that are going to increase the size of our /usr folder.
+RUN apt-get remove -y  apache2 python3-dev \
+        python3-pip python3-setuptools patchelf desktop-file-utils \
+        libgdk-pixbuf2.0-dev wget curl unzip gcc g++ make && apt-get autoremove -y  && apt-get clean -y
+
+FROM ubuntu:jammy as sast-scan-tools
+
+LABEL maintainer="qwiet.ai" \
+      org.label-schema.schema-version="1.0" \
+      org.label-schema.vendor="qwiet.ai" \
+      org.label-schema.name="sast-scan" \
+      org.label-schema.version=$CLI_VERSION \
+      org.label-schema.license="Apache-2.0" \
       org.label-schema.description="Container with various opensource static analysis security testing tools (shellcheck, gosec, tfsec, gitleaks, ...) for multiple programming languages" \
-      org.label-schema.url="https://www.shiftleft.io" \
+      org.label-schema.url="https://qwiet.ai" \
       org.label-schema.usage="https://github.com/ShiftLeftSecurity/sast-scan" \
       org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.vcs-url="https://github.com/ShiftLeftSecurity/sast-scan.git" \
       org.label-schema.docker.cmd="docker run --rm -it --name sast-scan shiftleft/sast-scan"
 
+# Beware, versions should be kept in sync with appimage-reqs.sh
 ENV APP_SRC_DIR=/usr/local/src \
     DEPSCAN_CMD="/usr/local/bin/depscan" \
-    MVN_CMD="/opt/apache-maven/bin/mvn" \
+    MVN_CMD="/usr/bin/mvn" \
     PMD_CMD="/opt/pmd-bin/bin/run.sh pmd" \
-    SB_VERSION=4.1.4 \
-    PMD_VERSION=6.29.0 \
-    PMD_JAVA_OPTS="" \
+    PMD_JAVA_OPTS="--enable-preview" \
+    SB_VERSION=4.7.3 \
+    PMD_VERSION=6.55.0 \
     SPOTBUGS_HOME=/opt/spotbugs \
     JAVA_HOME=/usr/lib/jvm/jre-11-openjdk \
     SCAN_JAVA_HOME=/usr/lib/jvm/jre-11-openjdk \
     SCAN_JAVA_11_HOME=/usr/lib/jvm/jre-11-openjdk \
     SCAN_JAVA_8_HOME=/usr/lib/jvm/jre-1.8.0 \
-    GRADLE_VERSION=6.5.1 \
+    GRADLE_VERSION=7.2 \
     GRADLE_HOME=/opt/gradle \
     GRADLE_CMD=gradle \
-    MAVEN_VERSION=3.6.3 \
-    MAVEN_HOME=/opt/apache-maven \
     PYTHONUNBUFFERED=1 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     SHIFTLEFT_HOME=/opt/sl-cli \
@@ -114,31 +93,13 @@ ENV APP_SRC_DIR=/usr/local/src \
     GOARCH=amd64 \
     GOOS=linux \
     CGO_ENABLED=0 \
+    NVD_EXCLUDE_TYPES="o,h" \
     PATH=/usr/local/src/:${PATH}:/opt/gradle/bin:/opt/apache-maven/bin:/usr/local/go/bin:/opt/sl-cli:/opt/phpsast/vendor/bin:
 
-COPY --from=builder /usr/local/bin/shiftleft /usr/local/bin
-COPY --from=builder /opt/pmd-bin-${PMD_VERSION} /opt/pmd-bin
-COPY --from=builder /opt/spotbugs-${SB_VERSION} /opt/spotbugs
-COPY --from=builder /opt/gradle-${GRADLE_VERSION} /opt/gradle
-COPY --from=builder /opt/apache-maven-${MAVEN_VERSION} /opt/apache-maven
-COPY tools_config/ /usr/local/src/
-COPY requirements.txt /usr/local/src/
-
-USER root
-
-RUN microdnf install python38-devel && pip3 install --no-cache-dir wheel \
-    && python3 -m pip install --upgrade pip \
-    && pip3 install --no-cache-dir -r /usr/local/src/requirements.txt \
-    && mv /usr/local/bin/scan /usr/local/bin/depscan \
-    && npm install --only=production -g @appthreat/cdxgen @microsoft/rush \
-    && mkdir -p /opt/sl-cli /opt/phpsast && cd /opt/phpsast && composer require --quiet --no-cache --dev vimeo/psalm \
-    && composer require --quiet --no-cache --dev phpstan/phpstan \
-    && composer require --quiet --no-cache --dev phpstan/extension-installer \
-    && microdnf remove -y python38-devel php-fpm php-devel php-pear automake make gcc gcc-c++ libtool \
-    && microdnf clean all
+# We only get what we need from the previous stage
+COPY --from=scan-base /opt /opt
+COPY --from=scan-base /usr /usr
 
 WORKDIR /app
-COPY scan /usr/local/src/
-COPY lib /usr/local/src/lib
 
 CMD [ "python3", "/usr/local/src/scan" ]

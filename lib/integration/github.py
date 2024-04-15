@@ -1,16 +1,3 @@
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 import json
 import os
 
@@ -22,7 +9,10 @@ from lib.logger import LOG
 
 g = None
 if os.getenv("GITHUB_TOKEN"):
-    g = GitHubLib(os.getenv("GITHUB_TOKEN"))
+    g = GitHubLib(
+        login_or_token=os.getenv("GITHUB_TOKEN"),
+        base_url=os.getenv("GITHUB_API_URL", "https://api.github.com"),
+    )
 
 
 class GitHub(GitProvider):
@@ -33,7 +23,7 @@ class GitHub(GitProvider):
             "runID": os.getenv("GITHUB_RUN_ID"),
             "repoFullname": os.getenv("GITHUB_REPOSITORY"),
             "triggerEvent": os.getenv("GITHUB_EVENT_NAME"),
-            "apiUrl": os.getenv("GITHUB_API_URL"),
+            "apiUrl": os.getenv("GITHUB_API_URL", "https://api.github.com"),
             "headRef": os.getenv("GITHUB_HEAD_REF"),
             "baseRef": os.getenv("GITHUB_BASE_REF"),
             "githubToken": os.getenv("GITHUB_TOKEN"),
@@ -61,13 +51,14 @@ class GitHub(GitProvider):
         revisionId = github_context.get("revisionId")
         if not github_context.get("repoFullname") or not revisionId:
             return
+        serverUrl = github_context.get("serverUrl")
         repoFullname = github_context.get("repoFullname")
         repo = g.get_repo(repoFullname)
         total_count = len(findings)
-        target_url = "https://slscan.io"
+        target_url = "https://appthreat.com"
         runID = github_context.get("runID")
         if runID:
-            target_url = f"https://github.com/{repoFullname}/actions/runs/{runID}"
+            target_url = f"{serverUrl}/{repoFullname}/actions/runs/{runID}"
         repo.get_commit(revisionId).create_status(
             state="success",
             target_url=target_url,
@@ -90,7 +81,7 @@ class GitHub(GitProvider):
                 summary = f'{summary}| {rv.get("tool")} | {rv.get("critical")} | {rv.get("high")} | {rv.get("medium")} | {rv.get("low")} | {status_emoji} |\n'
             template = config.get("PR_COMMENT_TEMPLATE")
             recommendation = (
-                """Please review the findings from Code scanning alerts before approving this pull request. You can also configure the [build rules](https://slscan.io/en/latest/integrations/tips/#config-file) or add [suppressions](https://slscan.io/en/latest/getting-started/#suppression) to customize this bot :thumbsup:"""
+                """Please review the findings from Code scanning alerts before approving this pull request. You can also configure the [build rules](https://appthreat.com/en/latest/integrations/tips/#config-file) or add [suppressions](https://appthreat.com/en/latest/getting-started/#suppression) to customize this bot :thumbsup:"""
                 if build_status == "fail"
                 else "Looks good :heavy_check_mark:"
             )

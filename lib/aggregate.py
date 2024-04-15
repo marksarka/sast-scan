@@ -1,22 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# This file is part of Scan.
-
-# Scan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# Scan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with Scan.  If not, see <https://www.gnu.org/licenses/>.
-
 import json
 import uuid
+from datetime import datetime
 
 import sarif_om as om
 from jschema_to_python.to_json import to_json
@@ -39,7 +25,7 @@ def jsonl_aggregate(run_data_list, out_file_name):
 
 
 def sarif_aggregate(run_data_list, out_sarif_name):
-    """
+    """Produce aggregated sarif data (Unused)
 
     :param run_data_list:
     :param out_sarif_name:
@@ -58,3 +44,20 @@ def sarif_aggregate(run_data_list, out_sarif_name):
     serialized_log = to_json(log)
     with open(out_sarif_name, "w") as outfile:
         outfile.write(serialized_log)
+
+
+def store_baseline(baseline_fingerprints, baseline_file):
+    """Produce baseline file
+
+    :param baseline_fingerprints: Fingerprints to store
+    :param baseline_file: Baseline filename
+    """
+    with open(baseline_file, "w") as outfile:
+        json.dump(
+            {
+                "baseline_fingerprints": baseline_fingerprints,
+                "created_at": str(datetime.now()),
+            },
+            outfile,
+            indent=2,
+        )

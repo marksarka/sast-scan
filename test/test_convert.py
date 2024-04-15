@@ -80,7 +80,7 @@ def test_nodejsscan_convert_metrics():
 
 
 def test_create_result():
-    issue = issueLib.issue_from_dict(
+    issue = issueLib.Issue.from_dict(
         {
             "description": "MD5 is a a weak hash which is known to have collision. Use a strong hashing function.",
             "filename": "InsufficientPasswordHash.js",
@@ -118,7 +118,7 @@ def test_create_result():
 def test_create_result_relative():
     os.environ["WORKSPACE"] = ""
     importlib.reload(convertLib)
-    issue = issueLib.issue_from_dict(
+    issue = issueLib.Issue.from_dict(
         {
             "line": "VERY_REDACTED ",
             "offender": "REDACTED",
@@ -242,7 +242,6 @@ def test_gosec_convert_issue():
             "high": 0,
             "low": 0,
         }
-        assert jsondata["runs"][0]["results"][0]["partialFingerprints"] == {}
 
 
 def test_tfsec_convert_issue():
@@ -256,7 +255,7 @@ def test_tfsec_convert_issue():
             [
                 {
                     "rule_id": "AWSTEST",
-                    "link": "https://github.com/liamg/tfsec/wiki/AWS018",
+                    "link": "https://github.com/aquasecurity/tfsec/wiki/AWS018",
                     "location": {
                         "filename": "/app/main.tf",
                         "start_line": 1,
@@ -402,7 +401,6 @@ def test_staticcheck_convert_issue():
             "medium": 0,
             "low": 1,
         }
-        assert jsondata["runs"][0]["results"][0]["partialFingerprints"] == {}
 
 
 def test_to_uri():
@@ -891,7 +889,7 @@ def test_get_help():
         "Check if there is an error prone vulnerability",
         {},
     )
-    assert url == "https://slscan.io?q=Error+Prone"
+    assert url == "https://appthreat.com?q=Error+Prone"
     url = convertLib.get_url(
         "source-js",
         "CWE-118 Incorrect Access of Indexable Resource ('Range Error') (4.0)",
@@ -1023,6 +1021,10 @@ def test_pytaint_extract_issue():
             "medium": 0,
             "low": 0,
         }
+        assert jsondata["runs"][0]["results"][0]["partialFingerprints"] == {
+            "scanFileHash": "422e70bb97927cc5",
+            "scanTagsHash": "d9a496fd1c3ce8a9",
+        }
 
 
 def test_ruby_convert_issue():
@@ -1080,3 +1082,6 @@ def test_ruby_convert_issue():
             jsondata["runs"][0]["results"][0]["message"]["text"]
             == "`Marshal.load` called with parameter value."
         )
+        assert jsondata["runs"][0]["results"][0]["partialFingerprints"] == {
+            "scanFileHash": "c7b25d276c64a838"
+        }
