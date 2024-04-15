@@ -1,0 +1,6 @@
+license-compliance:
+  deny_list:
+    - GPL*
+    - CCBY*
+    - MPL*
+  dual_license: restrictive # or permissive
