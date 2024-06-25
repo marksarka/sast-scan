@@ -16,3 +16,4 @@ PyGithub>=1.59
 PyYAML
 blint
 packaging
+anyio>=4.4.0 # not directly required, pinned by Snyk to avoid a vulnerability
