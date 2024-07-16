@@ -16,3 +16,4 @@ PyGithub>=1.59
 PyYAML
 blint
 packaging
+setuptools>=70.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
